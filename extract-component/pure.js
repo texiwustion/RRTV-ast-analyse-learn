@@ -31,7 +31,20 @@ function getJSXNodeByIndex(_index, JSXElementCollection) {
         }
     }
 }
-
+function getJSXNodeByRange(rangeStart, rangeEnd, JSXElementCollection) {
+    return {
+        JSXElement(path) {
+            if (path.node.start >= rangeStart && rangeEnd >= path.node.end &&
+                (JSXElementCollection.targetNode === undefined || 
+                !(path.node.start >= JSXElementCollection.targetNode.start && 
+                    JSXElementCollection.targetNode.end >= path.node.end))) {
+                JSXElementCollection.targetNode = path.node
+                JSXElementCollection.path = path
+                // console.log(path.node)
+            }
+        }
+    }
+}
 /**
  * generate ast from code
  */
@@ -45,15 +58,13 @@ const ast = parser.parse(code, {
  * @returns JSXElementCollection generated from JSXNode specified by index
  */
 function generateJSXElementCollection() {
-    let targetNode = {
-        start: -1,
-        end: 999999999,
-    }
+    let targetNode = undefined
     let JSXElementCollection = {
         targetNode,
         path: undefined
     }
-    traverse.default(ast, getJSXNodeByIndex(111, JSXElementCollection))
+    // traverse.default(ast, getJSXNodeByIndex(111, JSXElementCollection))
+    traverse.default(ast, getJSXNodeByRange(35, 113, JSXElementCollection))
     return JSXElementCollection
 }
 
@@ -61,7 +72,6 @@ function generateJSXElementCollection() {
 function getParentNodeUnilProgram() {
     const node = generateJSXElementCollection().targetNode
     const path = generateJSXElementCollection().path
-    console.log(1)
     const parentpath = path.findParent((_path) => t.isProgram(_path.parentPath.node))
 
     wrapJSXElementToFunctionDeclaration(node, path, parentpath.node, parentpath)
