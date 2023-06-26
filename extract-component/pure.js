@@ -14,15 +14,26 @@ function Button() {
   	<p title={a} id={b} className="hello">hello world</p>
     </div>
 }`;
+const codeWithJs = `const a = 10
+function Button({a, b, c}) {
+  return <div>
+    <button label="hello" id={a}>{a}</button>
+  	<p title={a} id={b} className="hello">hello world</p>\
+  {c ? <h1>you</h1> : <h1> me </h1>}
+    </div>
+}`
 
 /**
  * generate ast from code
  */
-const ast = parser.parse(code, {
+const ast_code = parser.parse(code, {
     sourceType: 'script', // module unambigious
     plugins: ['jsx', 'typescript'],
 });
-
+const ast = parser.parse(codeWithJs, {
+    sourceType: 'script', // module unambigious
+    plugins: ['jsx', 'typescript'],
+});
 /**
  * store Element infor
  * interface ElementSpecified {
@@ -200,16 +211,32 @@ function JSXElementToReferencesTransformer(JSXElementPath) {
         JSXExpressionContainer(path) {
             const parentPath = path.parentPath;
             if (
-                parentPath.isJSXAttribute() &&
+                (parentPath.isJSXAttribute()) &&
                 parentPath.node.name.name !== 'key' &&
                 parentPath.node.name.name !== 'ref'
             ) {
                 const { name } = path.node.expression;
                 references.add(name);
             }
+            else if (parentPath.isJSXElement) {
+               references.add(...getChildNames(path)) 
+            }
         },
     });
     return references;
+}
+
+function getChildNames(path) {
+//   const names = new Set();
+  const names = []
+  path.traverse({
+    Identifier(childPath) {
+      const name = childPath.node.name;
+      names.push(name)
+    }
+  }, path.scope);
+//   return Array.from(names);
+  return names
 }
 
 /**
@@ -273,11 +300,16 @@ function modifier() {
     const children = JSXElementSpecified.path.parentPath.get('children')
     let siblings = []
     // if (typeof children !== "object")
-    children.forEach(childPath => {
-        if (childPath.isJSXElement() && childPath !== JSXElementSpecified.path && range.start <= childPath.node.start && childPath.node.end <= range.end) {
-            siblings.push(childPath);
-        }
-    });
+    try {
+        children.forEach(childPath => {
+            if (childPath.isJSXElement() && childPath !== JSXElementSpecified.path && range.start <= childPath.node.start && childPath.node.end <= range.end) {
+                siblings.push(childPath);
+            }
+        });
+    } catch (e) {
+        // throw new Error("Choose error range!")
+        console.log("children is not iterable")
+    }
     siblings.push(JSXElementSpecified.path)
     let fragment = undefined
     if (siblings.length > 1) {
