@@ -1,3 +1,5 @@
+/// DO: range->JSXElement, if many siblings Element, don't store the last but store all
+
 const parser = require('@babel/parser');
 const traverse = require('@babel/traverse')
 const t = require('@babel/types')
@@ -14,38 +16,6 @@ function Button() {
 }`;
 
 /**
- * getJSXNodeByIndex
- * @param {number} _index the index in code
- * @param {object} JSXElementCollection an object contains targetNode and path to store specific element
- * @returns visitor for babel parser
- */
-function getJSXNodeByIndex(_index, JSXElementCollection) {
-    return {
-        JSXElement(path) {
-            if (path.node.start <= _index && _index <= path.node.end &&
-                !(path.node.start <= JSXElementCollection.targetNode.start && JSXElementCollection.targetNode.end <= path.node.end)) {
-                JSXElementCollection.targetNode = path.node
-                JSXElementCollection.path = path
-                // console.log(path.node)
-            }
-        }
-    }
-}
-function getJSXNodeByRange(rangeStart, rangeEnd, JSXElementCollection) {
-    return {
-        JSXElement(path) {
-            if (path.node.start >= rangeStart && rangeEnd >= path.node.end &&
-                (JSXElementCollection.targetNode === undefined || 
-                !(path.node.start >= JSXElementCollection.targetNode.start && 
-                    JSXElementCollection.targetNode.end >= path.node.end))) {
-                JSXElementCollection.targetNode = path.node
-                JSXElementCollection.path = path
-                // console.log(path.node)
-            }
-        }
-    }
-}
-/**
  * generate ast from code
  */
 const ast = parser.parse(code, {
@@ -53,59 +23,101 @@ const ast = parser.parse(code, {
     plugins: ['jsx', 'typescript'],
 });
 
-/**
- * generateJSXElementCollection
- * @returns JSXElementCollection generated from JSXNode specified by index
- */
-function generateJSXElementCollection() {
-    let targetNode = undefined
-    let JSXElementCollection = {
-        targetNode,
-        path: undefined
+let JSXElementSpecified = {
+    node: undefined,
+    path: undefined
+}
+
+const range = {
+    start: 0,
+    end: 180
+}
+
+function IndexToJSXElementGenerator(index, JSXElementSpecified) {
+    /// JSXElementSpecified: {node, path}
+    traverse.default(ast, IndexToJSXElementVisitor(index, JSXElementSpecified))
+    return JSXElementSpecified
+}
+function IndexToJSXElementVisitor(index, JSXElementSpecified) {
+    return {
+        JSXElement(path) {
+            if (IndexToJSXElementEdgeHandler(
+                path.node, {
+                index,
+                node: JSXElementSpecified.node,
+            })) {
+                JSXElementSpecified.node = path.node
+                JSXElementSpecified.path = path
+            }
+        }
     }
-    // traverse.default(ast, getJSXNodeByIndex(111, JSXElementCollection))
-    traverse.default(ast, getJSXNodeByRange(35, 113, JSXElementCollection))
-    return JSXElementCollection
+}
+function IndexToJSXElementEdgeHandler(node, opts) {
+    if (node.start <= opts.index && opts.index <= node.end &&
+        !(node.start <= opts.node.start && opts.node.end <= node.end)) {
+        return true
+    }
+    return false
+}
+function RangeToJSXElementGenerator(range, JSXElementSpecified) {
+    traverse.default(ast, RangeToJSXElementVisitor(range, JSXElementSpecified))
+    if (JSXElementSpecified.node === undefined) {
+        throw new Error("所选区域内无完整 XML 元素!")
+    }   
+    return JSXElementSpecified
+
+}
+function RangeToJSXElementVisitor(range, JSXElementSpecified) {
+    return {
+        JSXElement(path) {
+            if (RangeToJSXElementEdgeHandler(path.node, { range, node: JSXElementSpecified.node })) {
+                JSXElementSpecified.node = path.node
+                JSXElementSpecified.path = path
+            }
+        }
+
+    }
+}
+function RangeToJSXElementEdgeHandler(node, opts) {
+    if (range.start <= node.start && node.end <= range.end &&
+        (opts.node === undefined ||
+            !(opts.node.start <= node.start &&
+                node.end <= opts.node.end))) {
+        return true
+        // console.log(path.node)
+    }
+    return false
 }
 
-
-function getParentNodeUnilProgram() {
-    const node = generateJSXElementCollection().targetNode
-    const path = generateJSXElementCollection().path
+function PathToParentPathUnilProgram(path) {
+    /// TODO: 更好的检测方式，用 isProgram 并不稳定：考虑返回值的 parentPath
     const parentpath = path.findParent((_path) => t.isProgram(_path.parentPath.node))
-
-    wrapJSXElementToFunctionDeclaration(node, path, parentpath.node, parentpath)
+    const parentnode = parentpath.node
+    return {
+        node: parentnode,
+        path: parentpath
+    }
 }
-getParentNodeUnilProgram()
-const generateCode = generate(ast, {
-    comments: false,
-    retainLines: false,
-    compact: false,
-    concise: false,
-}).code;
-console.log(generateCode)
-function wrapJSXElementToFunctionDeclaration(JSXElementNode, JSXElementPath, FunctionDeclarationNode, FunctionDeclarationPath) {
 
-    const {newParams} = generateNewJSXElementAndParams(JSXElementPath, JSXElementNode);
-    // 创建新的函数体和函数参数
+function JSXElementToOuterFunctionDeclarationGenerator() {
+    const path = RangeToJSXElementGenerator(range, JSXElementSpecified).path
+    return PathToParentPathUnilProgram(path)
+}
+
+function JSXElementToNewFunctionDeclarationTransformer(JSXElementNode, Name, NewParams) {
+    // 创建新的函数体
     const newFunctionBody = t.blockStatement([t.returnStatement(JSXElementNode)]);
 
     // 创建新的FunctionDeclaration节点
     const newFunctionDeclaration = t.functionDeclaration(
-        t.identifier("NewFunction"),
-        newParams,
+        t.identifier(Name),
+        NewParams,
         newFunctionBody
     );
-    // console.log(FunctionDeclarationNode.id)
-    // 插入新的FunctionDeclaration节点作为与指定FunctionDeclaration节点同级的下一个节点
-    FunctionDeclarationPath.insertAfter(newFunctionDeclaration);
 
-    // 删除旧的JSXElement节点
-    // JSXElementPath.remove();
-    replaceJSXElement(JSXElementNode, JSXElementPath)
+    return newFunctionDeclaration
 }
-
-function getJSXElementReferences(JSXElementPath) {
+function JSXElementToReferencesTransformer(JSXElementPath) {
     const references = new Set();
 
     JSXElementPath.traverse({
@@ -121,18 +133,21 @@ function getJSXElementReferences(JSXElementPath) {
             }
         },
     });
-
     return references;
 }
-function replaceJSXElement(JSXElementNode, JSXElementPath) {
-    const {newJSXElement} = generateNewJSXElementAndParams(JSXElementPath, JSXElementNode);
 
-    // 替换 JSXElement 节点
-    JSXElementPath.replaceWith(newJSXElement);
+function ReferencesToFunctionParamsTransformer(references) {
+    let properties = []
+    for (let item of references) {
+        const key = t.identifier(item);
+        const value = t.identifier(item);
+        properties = [ ...properties, t.objectProperty(key, value, false, true)];
+    }
+    const objectPattern = t.objectPattern(properties);
+    const params = [objectPattern];
+    return params;
 }
-function generateNewJSXElementAndParams(JSXElementPath, JSXElementNode) {
-    const references = getJSXElementReferences(JSXElementPath);
-
+function JSXElementToAlternativeTransformer(JSXElementNode, references) {
     // 生成新的 JSXOpeningElement 节点
     const newJSXAttributes = JSXElementNode.openingElement.attributes
         .filter((attr) => {
@@ -149,13 +164,11 @@ function generateNewJSXElementAndParams(JSXElementPath, JSXElementNode) {
             // 将 JSX 属性的值转换成传递变量的形式
             return t.jsxAttribute(t.jsxIdentifier(propValue), t.jsxExpressionContainer(t.identifier(propValue)));
         });
-
     const newJSXOpeningElement = t.jsxOpeningElement(
         t.jsxIdentifier('NewFunction'),
         newJSXAttributes
     );
     newJSXOpeningElement.selfClosing = true; // 设置闭合标签属性为 true
-
 
     // 生成新的 JSXElement 节点
     const newJSXElement = t.jsxElement(
@@ -163,24 +176,34 @@ function generateNewJSXElementAndParams(JSXElementPath, JSXElementNode) {
         null,
         []
     );
-    
-    // 生成 函数参数
-    const newParams = buildFunctionParamsAst(newJSXAttributes)
-return {newJSXElement, newParams}
+
+    return newJSXElement
 }
 
-function generateFunctionParamsFromJSXAttributes(attributes) {
-  const result = attributes.map(attr => attr.name.name).join(', ');
-  return `{${result}}`;
+function modifier() {
+    RangeToJSXElementGenerator(range, JSXElementSpecified)
+
+    const references = JSXElementToReferencesTransformer(JSXElementSpecified.path)
+    const newParams = ReferencesToFunctionParamsTransformer(references)
+    const newFunctionDeclaration = JSXElementToNewFunctionDeclarationTransformer(JSXElementSpecified.node, "NewFunction", newParams)
+    const BasedFunctionDeclarationPath = JSXElementToOuterFunctionDeclarationGenerator().path
+
+    // 插入新的FunctionDeclaration节点作为与指定BasedFunctionDeclaration节点同级的下一个节点
+    BasedFunctionDeclarationPath.insertAfter(newFunctionDeclaration);
+
+    const JSXElementAlternative = JSXElementToAlternativeTransformer(JSXElementSpecified.node, references)
+    // 替换旧的JSXElement节点
+    JSXElementSpecified.path.replaceWith(JSXElementAlternative);
 }
 
-function buildFunctionParamsAst(attributes) {
-  const properties = attributes.map(attr => {
-    const key = t.identifier(attr.name.name);
-    const value = t.identifier(attr.name.name);
-    return t.objectProperty(key, value, false, true);
-  });
-  const objectPattern = t.objectPattern(properties);
-  const params = [objectPattern];
-  return params;
-}
+modifier()
+
+const generateCode = generate(ast, {
+    comments: false,
+    retainLines: false,
+    compact: false,
+    concise: false,
+    // sourceMaps: true,
+}).code;
+console.log(generateCode)
+
