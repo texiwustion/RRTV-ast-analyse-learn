@@ -39,9 +39,11 @@ let JSXElementSpecified = {
  * store range data
  */
 const range = {
-    start: 0,
-    end: 180
+    start: 1,
+    end: 1600
 }
+
+let SiblingsSpecified = new Set()
 
 /**
  * base on index and blank JSXElementSpecified, generate new JSXElementSpecified
@@ -98,20 +100,25 @@ function RangeToJSXElementGenerator(range, JSXElementSpecified) {
     traverse.default(ast, RangeToJSXElementVisitor(range, JSXElementSpecified))
     if (JSXElementSpecified.node === undefined) {
         throw new Error("所选区域内无完整 XML 元素!")
-    }   
+    }
     return JSXElementSpecified
 
 }
 /**
  * generate specific visitor
- * @param {Range} range the range of selection
- * @param {ElementSpecified} JSXElementSpecified 
+ * @param {range} the range of selection
+ * @param {JSXElementSpecified} JSXElementSpecified
+ * @param {SiblingsSpecified} it may have siblings
  * @returns visitor used to traverse for JSXElement
  */
 function RangeToJSXElementVisitor(range, JSXElementSpecified) {
     return {
         JSXElement(path) {
             if (RangeToJSXElementEdgeHandler(path.node, { range, node: JSXElementSpecified.node })) {
+                if (JSXElementSpecified.node !== undefined)
+                    if (path.node.end <= JSXElementSpecified.node.start || path.node.start >= JSXElementSpecified.node.end) {
+                        SiblingsSpecified.add(JSXElementSpecified)
+                    } // no siblings, it blank
                 JSXElementSpecified.node = path.node
                 JSXElementSpecified.path = path
             }
@@ -122,18 +129,18 @@ function RangeToJSXElementVisitor(range, JSXElementSpecified) {
 /**
  * judge whether to handle this trip when visiting
  * @param {node} node 
- * @param {Object} opts othre data: range, node
+ * @param {opts} other data: range, node
  * @returns whether to handle
  */
 function RangeToJSXElementEdgeHandler(node, opts) {
-    if (opts.range.start <= node.start && node.end <= opts.range.end &&
-        (opts.node === undefined ||
-            !(opts.node.start <= node.start &&
-                node.end <= opts.node.end))) {
+    if (!(opts.range.start <= node.start && node.end <= opts.range.end))
+        return false
+    if (opts.node === undefined)
         return true
-        // console.log(path.node)
-    }
-    return false
+    if (opts.node.start <= node.start && node.end <= opts.node.end)
+        return false
+
+    return true
 }
 
 /**
@@ -215,7 +222,7 @@ function ReferencesToFunctionParamsTransformer(references) {
     for (let item of references) {
         const key = t.identifier(item);
         const value = t.identifier(item);
-        properties = [ ...properties, t.objectProperty(key, value, false, true)];
+        properties = [...properties, t.objectProperty(key, value, false, true)];
     }
     const objectPattern = t.objectPattern(properties);
     const params = [objectPattern];
@@ -230,21 +237,19 @@ function ReferencesToFunctionParamsTransformer(references) {
  */
 function JSXElementToAlternativeTransformer(JSXElementNode, references) {
     // 生成新的 JSXOpeningElement 节点
-    const newJSXAttributes = JSXElementNode.openingElement.attributes
-        .filter((attr) => {
-            if (attr.value && t.isJSXExpressionContainer(attr.value)) {
-                const propValue = attr.value.expression.name;
-                return references.has(propValue);
-            } else {
-                return false;
-            }
-        })
-        .map((attr) => {
-            const propName = attr.name.name;
-            const propValue = attr.value.expression.name;
-            // 将 JSX 属性的值转换成传递变量的形式
-            return t.jsxAttribute(t.jsxIdentifier(propValue), t.jsxExpressionContainer(t.identifier(propValue)));
-        });
+    let newJSXAttributes = []
+    references.forEach(
+        (item) => {
+            newJSXAttributes=[
+                ...newJSXAttributes, 
+                t.jsxAttribute(
+                    t.jsxIdentifier(item), 
+                    t.jsxExpressionContainer(t.identifier(item)) 
+                )
+            ]
+        }
+    )
+    console.log(newJSXAttributes)
     const newJSXOpeningElement = t.jsxOpeningElement(
         t.jsxIdentifier('NewFunction'),
         newJSXAttributes
@@ -266,6 +271,7 @@ function JSXElementToAlternativeTransformer(JSXElementNode, references) {
  */
 function modifier() {
     RangeToJSXElementGenerator(range, JSXElementSpecified)
+    console.log(SiblingsSpecified)
 
     const references = JSXElementToReferencesTransformer(JSXElementSpecified.path)
     const newParams = ReferencesToFunctionParamsTransformer(references)
