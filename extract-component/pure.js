@@ -39,7 +39,7 @@ let JSXElementSpecified = {
  * store range data
  */
 const range = {
-    start: 1,
+    start: 46,
     end: 1600
 }
 
@@ -240,16 +240,15 @@ function JSXElementToAlternativeTransformer(JSXElementNode, references) {
     let newJSXAttributes = []
     references.forEach(
         (item) => {
-            newJSXAttributes=[
-                ...newJSXAttributes, 
+            newJSXAttributes = [
+                ...newJSXAttributes,
                 t.jsxAttribute(
-                    t.jsxIdentifier(item), 
-                    t.jsxExpressionContainer(t.identifier(item)) 
+                    t.jsxIdentifier(item),
+                    t.jsxExpressionContainer(t.identifier(item))
                 )
             ]
         }
     )
-    console.log(newJSXAttributes)
     const newJSXOpeningElement = t.jsxOpeningElement(
         t.jsxIdentifier('NewFunction'),
         newJSXAttributes
@@ -271,12 +270,38 @@ function JSXElementToAlternativeTransformer(JSXElementNode, references) {
  */
 function modifier() {
     RangeToJSXElementGenerator(range, JSXElementSpecified)
-    console.log(SiblingsSpecified)
+    const children = JSXElementSpecified.path.parentPath.get('children')
+    let siblings = []
+    // if (typeof children !== "object")
+    children.forEach(childPath => {
+        if (childPath.isJSXElement() && childPath !== JSXElementSpecified.path && range.start <= childPath.node.start && childPath.node.end <= range.end) {
+            siblings.push(childPath);
+        }
+    });
+    siblings.push(JSXElementSpecified.path)
+    let fragment = undefined
+    if (siblings.length > 1) {
+        fragment = wrapJSXElements(siblings)
+        siblings.forEach(childPath => {
+            if (childPath !== JSXElementSpecified.path)
+                childPath.remove()
+        })
+    }
+    // console.log(siblings)
 
+    const BasedFunctionDeclarationPath = JSXElementToOuterFunctionDeclarationGenerator().path
+    if (fragment) {
+        const FragmentElement = JSXElementSpecified.path.replaceWith(fragment)
+        console.log(FragmentElement)
+        JSXElementSpecified.path = FragmentElement[0]
+        JSXElementSpecified.node = FragmentElement[0].node
+    }
+    // console.log(JSXElementSpecified.node)
+    // JSXElementSpecified = {node: JSXElementSpecified.path.parentPath.node, path: JSXElementSpecified.path.parentPath}
+    // console.log(JSXElementSpecified.node)
     const references = JSXElementToReferencesTransformer(JSXElementSpecified.path)
     const newParams = ReferencesToFunctionParamsTransformer(references)
     const newFunctionDeclaration = JSXElementToNewFunctionDeclarationTransformer(JSXElementSpecified.node, "NewFunction", newParams)
-    const BasedFunctionDeclarationPath = JSXElementToOuterFunctionDeclarationGenerator().path
 
     // 插入新的FunctionDeclaration节点作为与指定BasedFunctionDeclaration节点同级的下一个节点
     BasedFunctionDeclarationPath.insertAfter(newFunctionDeclaration);
@@ -287,7 +312,19 @@ function modifier() {
 }
 
 modifier()
-
+function wrapJSXElements(paths) {
+    const jsxElements = paths.map(path => path.node);
+    const fragment = t.jsxFragment(t.jsxOpeningFragment(), t.jsxClosingFragment(), jsxElements);
+    return fragment
+    //   paths[0].replaceWith(fragment);
+    // console.log(generate(fragment, {
+    // comments: false,
+    // retainLines: false,
+    // compact: false,
+    // concise: false,
+    // sourceMaps: true,
+    // }).code)
+}
 /**
  * base on ast, generate {code, map}
  */
