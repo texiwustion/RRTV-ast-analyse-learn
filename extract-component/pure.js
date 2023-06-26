@@ -23,21 +23,43 @@ const ast = parser.parse(code, {
     plugins: ['jsx', 'typescript'],
 });
 
+/**
+ * store Element infor
+ * interface ElementSpecified {
+ *     node;
+ *     path;
+ * }
+ */
 let JSXElementSpecified = {
     node: undefined,
     path: undefined
 }
 
+/**
+ * store range data
+ */
 const range = {
     start: 0,
     end: 180
 }
 
+/**
+ * base on index and blank JSXElementSpecified, generate new JSXElementSpecified
+ * @param {number} index where the cursor is
+ * @param {ElementSpecified} JSXElementSpecified 
+ * @returns new JSXElementSpecified
+ */
 function IndexToJSXElementGenerator(index, JSXElementSpecified) {
     /// JSXElementSpecified: {node, path}
     traverse.default(ast, IndexToJSXElementVisitor(index, JSXElementSpecified))
     return JSXElementSpecified
 }
+/**
+ * generate specific visitor
+ * @param {number} index where the cursor is
+ * @param {ElementSpecified} JSXElementSpecified 
+ * @returns visitor used to traverse for JSXElement
+ */
 function IndexToJSXElementVisitor(index, JSXElementSpecified) {
     return {
         JSXElement(path) {
@@ -52,6 +74,12 @@ function IndexToJSXElementVisitor(index, JSXElementSpecified) {
         }
     }
 }
+/**
+ * judge whether to handle this trip when visiting
+ * @param {node} node 
+ * @param {Object} opts othre data: index, node
+ * @returns whether to handle
+ */
 function IndexToJSXElementEdgeHandler(node, opts) {
     if (node.start <= opts.index && opts.index <= node.end &&
         !(node.start <= opts.node.start && opts.node.end <= node.end)) {
@@ -59,6 +87,13 @@ function IndexToJSXElementEdgeHandler(node, opts) {
     }
     return false
 }
+
+/**
+ * base on range and blank JSXElementSpecified, generate new JSXElementSpecified
+ * @param {Range} range the range of selection
+ * @param {ElementSpecified} JSXElementSpecified 
+ * @returns new JSXElementSpecified
+ */
 function RangeToJSXElementGenerator(range, JSXElementSpecified) {
     traverse.default(ast, RangeToJSXElementVisitor(range, JSXElementSpecified))
     if (JSXElementSpecified.node === undefined) {
@@ -67,6 +102,12 @@ function RangeToJSXElementGenerator(range, JSXElementSpecified) {
     return JSXElementSpecified
 
 }
+/**
+ * generate specific visitor
+ * @param {Range} range the range of selection
+ * @param {ElementSpecified} JSXElementSpecified 
+ * @returns visitor used to traverse for JSXElement
+ */
 function RangeToJSXElementVisitor(range, JSXElementSpecified) {
     return {
         JSXElement(path) {
@@ -78,8 +119,14 @@ function RangeToJSXElementVisitor(range, JSXElementSpecified) {
 
     }
 }
+/**
+ * judge whether to handle this trip when visiting
+ * @param {node} node 
+ * @param {Object} opts othre data: range, node
+ * @returns whether to handle
+ */
 function RangeToJSXElementEdgeHandler(node, opts) {
-    if (range.start <= node.start && node.end <= range.end &&
+    if (opts.range.start <= node.start && node.end <= opts.range.end &&
         (opts.node === undefined ||
             !(opts.node.start <= node.start &&
                 node.end <= opts.node.end))) {
@@ -89,6 +136,11 @@ function RangeToJSXElementEdgeHandler(node, opts) {
     return false
 }
 
+/**
+ * base on current path, generate specification of parent path adjacent to Program
+ * @param {path} path current path
+ * @returns specification of parent path adjacent to Program
+ */
 function PathToParentPathUnilProgram(path) {
     /// TODO: 更好的检测方式，用 isProgram 并不稳定：考虑返回值的 parentPath
     const parentpath = path.findParent((_path) => t.isProgram(_path.parentPath.node))
@@ -99,11 +151,22 @@ function PathToParentPathUnilProgram(path) {
     }
 }
 
+/**
+ * base on the JSXElement in current range, generate specification of parent path adjacent to Program
+ * @returns specification of parent path adjacent to Program
+ */
 function JSXElementToOuterFunctionDeclarationGenerator() {
     const path = RangeToJSXElementGenerator(range, JSXElementSpecified).path
     return PathToParentPathUnilProgram(path)
 }
 
+/**
+ * give base and Name, new params, transform jsx to function wrapping it
+ * @param {*} JSXElementNode based JSXElement
+ * @param {*} Name Name of New Function
+ * @param {*} NewParams Params of New Function
+ * @returns new FunctionDeclaration based on JSXElement
+ */
 function JSXElementToNewFunctionDeclarationTransformer(JSXElementNode, Name, NewParams) {
     // 创建新的函数体
     const newFunctionBody = t.blockStatement([t.returnStatement(JSXElementNode)]);
@@ -117,6 +180,12 @@ function JSXElementToNewFunctionDeclarationTransformer(JSXElementNode, Name, New
 
     return newFunctionDeclaration
 }
+
+/**
+ * give base, transform JSXElement to its references
+ * @param {*} JSXElementPath base JSXElement
+ * @returns all of its references, like {'a', 'b'}
+ */
 function JSXElementToReferencesTransformer(JSXElementPath) {
     const references = new Set();
 
@@ -136,6 +205,11 @@ function JSXElementToReferencesTransformer(JSXElementPath) {
     return references;
 }
 
+/**
+ * give base, tranform refs to params of a function
+ * @param {*} references base refs
+ * @returns new params of a function
+ */
 function ReferencesToFunctionParamsTransformer(references) {
     let properties = []
     for (let item of references) {
@@ -147,6 +221,13 @@ function ReferencesToFunctionParamsTransformer(references) {
     const params = [objectPattern];
     return params;
 }
+
+/**
+ * give base, attention to refs, transform JSXElement to its Alternative
+ * @param {*} JSXElementNode base
+ * @param {*} references base
+ * @returns its Alterative which serves origin as child
+ */
 function JSXElementToAlternativeTransformer(JSXElementNode, references) {
     // 生成新的 JSXOpeningElement 节点
     const newJSXAttributes = JSXElementNode.openingElement.attributes
@@ -180,6 +261,9 @@ function JSXElementToAlternativeTransformer(JSXElementNode, references) {
     return newJSXElement
 }
 
+/**
+ * modify the ast based on all Elements, which generated from generator or transformed from original Element
+ */
 function modifier() {
     RangeToJSXElementGenerator(range, JSXElementSpecified)
 
@@ -198,6 +282,9 @@ function modifier() {
 
 modifier()
 
+/**
+ * base on ast, generate {code, map}
+ */
 const generateCode = generate(ast, {
     comments: false,
     retainLines: false,
@@ -205,5 +292,6 @@ const generateCode = generate(ast, {
     concise: false,
     // sourceMaps: true,
 }).code;
+
 console.log(generateCode)
 
