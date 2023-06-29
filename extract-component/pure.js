@@ -23,6 +23,7 @@ function Button({a, b, c}) {
     </div>
 }`
 
+
 /**
  * generate ast from code
  */
@@ -50,7 +51,7 @@ let JSXElementSpecified = {
  * store range data
  */
 const range = {
-    start: 46,
+    start: 76,
     end: 1600
 }
 
@@ -115,6 +116,25 @@ function RangeToJSXElementGenerator(range, JSXElementSpecified) {
     return JSXElementSpecified
 
 }
+function RangeToJSXExpresionContainer(range, JSXExpressionContainerSpecified) {
+    traverse.default(ast, RangeToJSXExprssionContainerVisitor(range, JSXExpressionContainerSpecified))
+    if (JSXExpressionContainerSpecified.node === undefined) {
+        throw new Error("所选区域内无完整元素!")
+    }
+    return JSXExpressionContainerSpecified
+
+}
+function RangeToJSXExpressionContainer(node, opts) {
+    if (!(opts.range.start <= node.start && node.end <= opts.range.end))
+        return false
+    if (opts.node === undefined)
+        return true
+    if (opts.node.start <= node.start && node.end <= opts.node.end)
+        return false
+
+    return true
+}
+
 /**
  * generate specific visitor
  * @param {range} the range of selection
@@ -153,6 +173,7 @@ function RangeToJSXElementEdgeHandler(node, opts) {
 
     return true
 }
+
 
 /**
  * base on current path, generate specification of parent path adjacent to Program
@@ -218,8 +239,8 @@ function JSXElementToReferencesTransformer(JSXElementPath) {
                 const { name } = path.node.expression;
                 references.add(name);
             }
-            else if (parentPath.isJSXElement) {
-               references.add(...getChildNames(path)) 
+            else if (parentPath.isJSXElement()) {
+                references.add(...getChildNames(path))
             }
         },
     });
@@ -227,16 +248,16 @@ function JSXElementToReferencesTransformer(JSXElementPath) {
 }
 
 function getChildNames(path) {
-//   const names = new Set();
-  const names = []
-  path.traverse({
-    Identifier(childPath) {
-      const name = childPath.node.name;
-      names.push(name)
-    }
-  }, path.scope);
-//   return Array.from(names);
-  return names
+    //   const names = new Set();
+    const names = []
+    path.traverse({
+        Identifier(childPath) {
+            const name = childPath.node.name;
+            names.push(name)
+        }
+    }, path.scope);
+    //   return Array.from(names);
+    return names
 }
 
 /**
@@ -302,7 +323,7 @@ function modifier() {
     // if (typeof children !== "object")
     try {
         children.forEach(childPath => {
-            if (childPath.isJSXElement() && childPath !== JSXElementSpecified.path && range.start <= childPath.node.start && childPath.node.end <= range.end) {
+            if ((childPath.isJSXElement() || childPath.isJSXExpressionContainer()) && childPath !== JSXElementSpecified.path && range.start <= childPath.node.start && childPath.node.end <= range.end) {
                 siblings.push(childPath);
             }
         });
@@ -341,6 +362,7 @@ function modifier() {
     const JSXElementAlternative = JSXElementToAlternativeTransformer(JSXElementSpecified.node, references)
     // 替换旧的JSXElement节点
     JSXElementSpecified.path.replaceWith(JSXElementAlternative);
+    console.log(BasedFunctionDeclarationPath.node)
 }
 
 modifier()
@@ -361,7 +383,7 @@ function wrapJSXElements(paths) {
  * base on ast, generate {code, map}
  */
 const generateCode = generate(ast, {
-    comments: false,
+    comments: true,
     retainLines: false,
     compact: false,
     concise: false,
